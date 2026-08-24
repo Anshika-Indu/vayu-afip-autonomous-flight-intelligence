@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HL-150 // Dual-Duct Tiltrotor Transition Simulator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<!-- AFIP :: Autonomous Flight Intelligence Platform (Phase 2 — Evidence Integration) -->
+<!-- Additive only — nothing below changes simulator rendering, physics, or controls. -->
+<script src="afip/afip-core.js"></script>
+<script src="afip/evidence-adapter.js"></script>
+<script src="afip/world-state.js"></script>
+<!-- AFIP :: Phase 4 — Health Monitor (reasoning modules load order-independent among themselves) -->
+<script src="afip/health-monitor.js"></script>
+<!-- AFIP :: Phase 5 — Prediction Engine -->
+<script src="afip/prediction-engine.js"></script>
+<!-- AFIP :: Phase 6 — Risk Engine -->
+<script src="afip/risk-engine.js"></script>
+<!-- AFIP :: Phase 7 — Mission Executive (proposer) -->
+<script src="afip/mission-executive.js"></script>
+<!-- AFIP :: Phase 8 — Decision Engine (arbitration; must load after mission-executive.js) -->
+<script src="afip/decision-engine.js"></script>
+<!-- AFIP :: Phase 10 — Mission Planner (must load before navigation.js, which reads Navigation.Waypoints it publishes) -->
+<script src="afip/mission-planner.js"></script>
+<!-- AFIP :: Phase 10 — Navigation System -->
+<script src="afip/navigation.js"></script>
+<!-- AFIP :: Phase 10 — Operator Commands (must load before decision-engine.js runs each cycle, since it reads AFIP.OperatorCommands.getLatest(); load order among script tags doesn't matter here since decision-engine.js only calls it inside update(), not at load time) -->
+<script src="afip/operator-commands.js"></script>
+<!-- AFIP :: Phase 9 — Explainability Engine (renderer; must load after mission-executive.js and decision-engine.js) -->
+<script src="afip/explainability.js"></script>
+<!-- AFIP :: Phase 10 — Mission Timeline (explainability.js calls AFIP.MissionTimeline.record() defensively; load order relative to explainability.js doesn't matter since that call happens inside update(), not at load time) -->
+<script src="afip/mission-timeline.js"></script>
+<!-- AFIP :: Phase 11 — UI (render-only; ui-common.js must load before every panel file) -->
+<script src="afip/ui/ui-common.js"></script>
+<script src="afip/ui/health-panel.js"></script>
+<script src="afip/ui/prediction-panel.js"></script>
+<script src="afip/ui/risk-panel.js"></script>
+<script src="afip/ui/mission-planner-panel.js"></script>
+<script src="afip/ui/navigation-panel.js"></script>
+<script src="afip/ui/mission-panel.js"></script>
+<script src="afip/ui/decision-console.js"></script>
+<script src="afip/ui/explainability-panel.js"></script>
+<script src="afip/ui/operator-console.js"></script>
+<script src="afip/ui/timeline-panel.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg: #05070c;
+    --bg-2: #0a0d16;
+    --panel: rgba(255,255,255,0.035);
+    --panel-2: rgba(255,255,255,0.055);
+    --border: rgba(255,255,255,0.09);
+    --ink: #e9edf4;
+    --dim: #808898;
+    --faint: #4b5262;
+    --amber: #ffb020;
+    --green: #35e08a;
+    --cyan: #4fb3ff;
+    --red: #ff4f5e;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+    --radius: 12px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:
+      radial-gradient(900px 500px at 12% -10%, rgba(255,176,32,0.07), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(79,179,255,0.08), transparent 55%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans); -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  a{color:inherit; text-decoration:none;}
+  .mono{font-family:var(--mono);}
+  ::selection{background:var(--amber); color:#0a0a12;}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 28px;}
+
+  /* nav */
+  nav{position:sticky; top:0; z-index:50; backdrop-filter:blur(14px); background:rgba(5,7,12,0.75); border-bottom:1px solid var(--border);}
+  nav .wrap{display:flex; align-items:center; justify-content:space-between; height:64px;}
+  .brand{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-weight:600; font-size:14px; letter-spacing:0.03em;}
+  .brand .dot{width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 10px 2px var(--green); animation:blink 2s infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.4;}}
+  .navlinks{display:flex; gap:30px; font-size:13.5px; color:var(--dim); font-family:var(--mono);}
+  .navlinks a:hover{color:var(--ink);}
+
+  /* hero */
+  header.hero{padding:88px 0 56px;}
+  .eyebrow{display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11.5px; letter-spacing:0.08em; color:var(--amber); text-transform:uppercase; border:1px solid rgba(255,176,32,0.3); background:rgba(255,176,32,0.06); padding:6px 12px; border-radius:100px; margin-bottom:24px;}
+  h1.title{font-size:clamp(34px,5.4vw,58px); line-height:1.05; font-weight:700; max-width:820px; letter-spacing:-0.01em;}
+  h1.title .accent{color:var(--amber);}
+  p.lede{color:var(--dim); font-size:16.5px; line-height:1.65; max-width:600px; margin-top:20px;}
+  .spec-row{display:flex; gap:28px; flex-wrap:wrap; margin-top:28px; font-family:var(--mono); font-size:12.5px; color:var(--dim);}
+  .spec-row b{color:var(--ink); font-weight:600;}
+  .hero-actions{margin-top:32px; display:flex; gap:12px;}
+  .btn{font-family:var(--mono); font-weight:600; font-size:13.5px; padding:12px 22px; border-radius:8px; cursor:pointer; border:none; transition:transform .15s, box-shadow .15s;}
+  .btn:active{transform:scale(0.97);}
+  .btn-primary{background:var(--amber); color:#181000;}
+  .btn-primary:hover{box-shadow:0 6px 22px rgba(255,176,32,0.28);}
+  .btn-ghost{background:transparent; border:1px solid var(--border); color:var(--ink);}
+  .btn-ghost:hover{background:rgba(255,255,255,0.05);}
+
+  .section{padding:64px 0;}
+  .section-head{margin-bottom:32px; display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap;}
+  .section-head h2{font-size:clamp(24px,3vw,32px); font-weight:700; margin:8px 0 0;}
+  .section-head p{color:var(--dim); max-width:440px; font-size:14.5px; line-height:1.6;}
+  .tag{font-family:var(--mono); font-size:11.5px; color:var(--faint); text-transform:uppercase; letter-spacing:0.08em;}
+
+  /* lab layout */
+  .lab{display:grid; grid-template-columns:290px 1fr; gap:18px;}
+  @media (max-width:940px){ .lab{grid-template-columns:1fr;} }
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px;}
+
+  .controls h3{font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--dim); margin:0 0 16px;}
+  .field{margin-bottom:18px;}
+  .field-label{display:flex; justify-content:space-between; align-items:baseline; font-size:12.5px; color:var(--dim); margin-bottom:8px; font-family:var(--mono);}
+  .field-label span.name{color:var(--ink);}
+  .field-label span.val{color:var(--amber);}
+  input[type=range]{-webkit-appearance:none; width:100%; height:4px; border-radius:4px; background:rgba(255,255,255,0.12); outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--amber); cursor:pointer; box-shadow:0 0 0 4px rgba(255,176,32,0.18); transition:box-shadow .15s;}
+  input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(255,176,32,0.25);}
+  input[type=range]::-moz-range-thumb{width:15px; height:15px; border-radius:50%; border:none; background:var(--amber); cursor:pointer;}
+
+  .divider{height:1px; background:var(--border); margin:20px 0;}
+  .toggles{display:flex; gap:8px; flex-wrap:wrap;}
+  .icon-btn{flex:1; min-width:70px; display:flex; align-items:center; justify-content:center; gap:6px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid var(--border); color:var(--dim); font-size:12.5px; font-family:var(--mono); cursor:pointer; transition:all .15s;}
+  .icon-btn:hover{color:var(--ink); background:rgba(255,255,255,0.08);}
+  .icon-btn.on{color:#0a0a12; background:var(--ink);}
+  .speedgroup{display:flex; gap:6px; margin-top:8px;}
+  .speed-btn{flex:1; padding:8px; border-radius:7px; background:rgba(255,255,255,0.03); border:1px solid var(--border); color:var(--faint); font-family:var(--mono); font-size:11.5px; cursor:pointer;}
+  .speed-btn.active{color:var(--amber); border-color:rgba(255,176,32,0.4); background:rgba(255,176,32,0.08);}
+
+  .status-log{
+    margin-top:18px; padding:16px 16px 16px 18px; border-radius:12px;
+    background:linear-gradient(135deg, rgba(53,224,138,0.12), rgba(255,255,255,0.02) 60%);
+    border:1px solid rgba(53,224,138,0.35); border-left:3px solid var(--green);
+    font-family:var(--mono); font-size:12.5px; line-height:1.7; color:var(--dim);
+    box-shadow:0 4px 24px rgba(53,224,138,0.10), inset 0 1px 0 rgba(255,255,255,0.04);
+    transition:background .35s ease, border-color .35s ease, box-shadow .35s ease;
+  }
+  .status-log .line1{
+    display:flex; align-items:center; gap:9px;
+    color:var(--green); font-size:14px; font-weight:700; letter-spacing:0.03em;
+    margin-bottom:8px;
+  }
+  .status-log .line1::before{
+    content:''; width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0;
+    box-shadow:0 0 10px 2px currentColor; animation:statuspulse 2s ease-in-out infinite;
+  }
+  @keyframes statuspulse{0%,100%{opacity:1; transform:scale(1);} 50%{opacity:0.4; transform:scale(0.85);}}
+  .status-sub{
+    font-family:var(--sans); font-size:12.5px; line-height:1.55; color:var(--dim);
+    margin-bottom:14px; padding-left:16px;
+  }
+  .status-eq{display:flex; flex-direction:column; gap:9px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);}
+  .eq-row{display:flex; flex-wrap:wrap; align-items:baseline; column-gap:8px; row-gap:2px;}
+  .eq-row .eq-label{color:var(--ink); font-weight:700; font-size:12.5px;}
+  .eq-row .eq-expr{color:var(--faint); font-size:11.5px;}
+  .eq-row .eq-val{margin-left:auto; font-size:12.5px; color:var(--dim); white-space:nowrap;}
+  .status-log.warn{background:linear-gradient(135deg, rgba(255,176,32,0.14), rgba(255,255,255,0.02) 60%); border-color:rgba(255,176,32,0.4); border-left-color:var(--amber); box-shadow:0 4px 24px rgba(255,176,32,0.12), inset 0 1px 0 rgba(255,255,255,0.04);}
+  .status-log.warn .line1{color:var(--amber);}
+  .status-log.danger{background:linear-gradient(135deg, rgba(255,79,94,0.16), rgba(255,255,255,0.02) 60%); border-color:rgba(255,79,94,0.45); border-left-color:var(--red); box-shadow:0 4px 24px rgba(255,79,94,0.14), inset 0 1px 0 rgba(255,255,255,0.04);}
+  .status-log.danger .line1{color:var(--red);}
+  .status-log b{color:var(--ink); font-size:13.5px;}
+
+  /* stage */
+  .stage-panel{padding:0; overflow:hidden;}
+  .stage-top{padding:16px 20px 10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;}
+  .stage-top .name{font-family:var(--mono); font-weight:600; font-size:13px; color:var(--amber); letter-spacing:0.04em;}
+  .stage-top .meta{font-family:var(--mono); font-size:11px; color:var(--faint);}
+  canvas{display:block; width:100%;}
+  #stageCanvas{height:420px;}
+  #chartCanvas{height:150px; border-top:1px solid var(--border);}
+
+  .stat-grid{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); border-top:1px solid var(--border);}
+  .stat{background:var(--bg-2); padding:16px 20px;}
+  .stat .k{font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--faint); margin-bottom:6px;}
+  .stat .v{font-family:var(--mono); font-size:22px; font-weight:600; color:var(--ink);}
+  .stat .v .unit{font-size:13px; color:var(--dim); font-weight:400; margin-left:4px;}
+  .stat.phase .v{color:var(--amber); font-size:18px;}
+  .stat.shear .v{transition:color .2s;}
+
+  /* timeline */
+  .timeline-wrap{padding:16px 20px 20px; border-top:1px solid var(--border);}
+  .timeline-meta{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--faint); margin-bottom:8px;}
+  .timeline{position:relative; height:38px; border-radius:8px; overflow:hidden; cursor:pointer; display:flex; border:1px solid var(--border);}
+  .tl-seg{height:100%; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:10.5px; letter-spacing:0.04em; color:var(--dim); position:relative; border-right:1px solid rgba(0,0,0,0.4); transition:background .2s;}
+  .tl-seg:last-child{border-right:none;}
+  .tl-seg.active{color:#0a0a12; font-weight:600;}
+  .tl-playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--ink); box-shadow:0 0 8px 2px rgba(255,255,255,0.6); pointer-events:none;}
+
+  /* theory */
+  .theory-grid{display:grid; grid-template-columns:1fr 1fr; gap:36px; align-items:center;}
+  @media (max-width:860px){ .theory-grid{grid-template-columns:1fr;} }
+  .formula-card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:28px; font-family:var(--mono);}
+  .formula-big{font-size:19px; color:var(--ink); margin-bottom:10px;}
+  .formula-big .hi{color:var(--cyan);}
+  .formula-sub{font-size:12.5px; color:var(--dim); line-height:1.9;}
+  .theory-copy p{color:var(--dim); font-size:15px; line-height:1.75; margin:0 0 15px;}
+  .theory-copy strong{color:var(--ink); font-weight:600;}
+
+  footer{border-top:1px solid var(--border); padding:32px 0;}
+  footer .wrap{display:flex; justify-content:space-between; color:var(--faint); font-size:12.5px; font-family:var(--mono); flex-wrap:wrap; gap:8px;}
+
+  @media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> HL-150 // TRANSITION SIM</div>
+    <div class="navlinks">
+      <a href="#lab">Simulator</a>
+      <a href="#theory">Gyroscopics</a>
+      <a href="#about">About</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">● Dual coaxial-duct tilt architecture</div>
+    <h1 class="title">Watch a heavy-lift drone <span class="accent">tilt from hover to cruise.</span></h1>
+    <p class="lede">A dual-duct tiltrotor has to rotate two counter-spinning rotors 90° in mid-air without twisting itself apart.
+      Scrub through the full flight — spool-up, climb, transition, cruise — and watch the gyroscopic math that keeps it stable.</p>
+    <div class="spec-row">
+      <span>FOOTPRINT <b>3.0 × 3.0 m</b></span>
+      <span>PAYLOAD <b>0–80 kg</b></span>
+      <span>MTOW <b>150 kg</b></span>
+      <span>CRUISE <b>up to 120 km/h</b></span>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-primary" onclick="document.getElementById('lab').scrollIntoView({behavior:'smooth'})">Run the simulation</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('theory').scrollIntoView({behavior:'smooth'})">How the shear works</button>
+    </div>
+  </div>
+</header>
+
+<section class="section" id="lab">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="tag">01 — Flight test</div><h2>Transition bench</h2></div>
+      <p>Every slider re-runs the physics live: rotor tilt rate, spar shear, and the flight-phase timeline all update together.</p>
+    </div>
+
+    <div class="lab">
+      <div class="panel controls">
+        <h3>Mission parameters</h3>
+
+        <div class="field">
+          <div class="field-label"><span class="name">Transition duration</span><span class="val" id="val-transdur">6.0 s</span></div>
+          <input type="range" id="transdur" min="3" max="10" step="0.1" value="6">
+        </div>
+        <div class="field">
+          <div class="field-label"><span class="name">Payload</span><span class="val" id="val-payload">80 kg</span></div>
+          <input type="range" id="payload" min="0" max="80" step="1" value="80">
+        </div>
+        <div class="field">
+          <div class="field-label"><span class="name">Cruise speed target</span><span class="val" id="val-cruise">120 km/h</span></div>
+          <input type="range" id="cruisespeed" min="60" max="120" step="1" value="120">
+        </div>
+        <div class="field">
+          <div class="field-label"><span class="name">Cruise altitude</span><span class="val" id="val-alt">42 m</span></div>
+          <input type="range" id="cruisealt" min="10" max="100" step="1" value="75">
+        </div>
+
+        <div class="divider"></div>
+        <div class="toggles">
+          <button class="icon-btn on" id="playBtn">⏸ Playing</button>
+          <button class="icon-btn" id="resetBtn">↺ Reset</button>
+        </div>
+        <div class="speedgroup">
+          <button class="speed-btn" data-speed="0.25">0.25×</button>
+          <button class="speed-btn active" data-speed="1">1×</button>
+          <button class="speed-btn" data-speed="2">2×</button>
+        </div>
+
+        <div class="status-log" id="statusLog">
+          <div class="line1" id="statusLine">[STATUS: PRECESSION NEUTRALIZED — CW/CCW HARMONIC BALANCE]</div>
+          <div class="status-sub" id="statusSub">Both ducts tilt at the same rate but spin in opposite directions, so their gyroscopic reaction torques cancel out at the airframe.</div>
+          <div class="status-eq">
+            <div class="eq-row"><span class="eq-label">τ_gyro</span><span class="eq-expr">= K(payload) × Ω_tilt</span><span class="eq-val"><b><span id="readout-taugyro">0.0</span></b> N·m per motor</span></div>
+            <div class="eq-row"><span class="eq-label">Σ τ_net</span><span class="eq-expr">= τ_CW + τ_CCW</span><span class="eq-val">(<span id="readout-cw">+0.0</span>) + (<span id="readout-ccw">-0.0</span>) = <b><span id="readout-net">0.0</span></b> N·m</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel stage-panel">
+        <div class="stage-top">
+          <span class="name" id="phaseLabel">PHASE 1 · VTOL SPOOL-UP</span>
+          <!-- view toggle removed -->
+          <span class="meta mono" id="timeLabel">T+00.0s</span>
+        </div>
+        <div style="position:relative;">
+          <canvas id="stageCanvas"></canvas>
+          <div style="position:absolute; top:12px; right:12px; z-index:10;">
+            <button class="icon-btn" id="fpvBtn" style="background:rgba(5,7,12,0.8); padding:8px 14px; border:1px solid var(--border); font-size:11px;">🎥 VIEW: 3RD PERSON</button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat phase"><div class="k">Flight phase</div><div class="v" id="stat-phase">VTOL SPOOL-UP</div></div>
+          <div class="stat"><div class="k">Velocity</div><div class="v" id="stat-vel">0<span class="unit">km/h</span></div></div>
+          <div class="stat"><div class="k">Rotor tilt angle</div><div class="v" id="stat-tilt">90.0<span class="unit">°</span></div></div>
+          <div class="stat"><div class="k">Altitude (AGL)</div><div class="v" id="stat-alt">0.0<span class="unit">m</span></div></div>
+          <div class="stat shear"><div class="k">Spar torsional shear</div><div class="v" id="stat-shear">0.0<span class="unit">N·m</span></div></div>
+          <div class="stat"><div class="k">Gyroscopic net</div><div class="v" id="stat-netv" style="color:var(--green);">0.0<span class="unit">N·m</span></div></div>
+        </div>
+
+        <canvas id="chartCanvas"></canvas>
+
+        <div class="timeline-wrap">
+          <div class="timeline-meta"><span>MISSION TIMELINE</span><span id="loopLabel">15.0s loop</span></div>
+          <div class="timeline" id="timeline">
+            <div class="tl-seg" data-phase="0">1 · SPOOL-UP</div>
+            <div class="tl-seg" data-phase="1">2 · V-CLIMB</div>
+            <div class="tl-seg" data-phase="2">3 · TRANSITION</div>
+            <div class="tl-seg" data-phase="3">4 · CRUISE</div>
+            <div class="tl-seg" data-phase="4">5 · REV-TRANS</div>
+            <div class="tl-seg" data-phase="5">6 · DESCENT</div>
+            <div class="tl-playhead" id="playhead"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="afip-ocs">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="tag">02 — Autonomy</div><h2>AFIP Operator Control Station</h2></div>
+      <p>Render-only panels — every value below is a display of output already produced by a reasoning module; nothing here computes or arbitrates anything itself.</p>
+    </div>
+    <div id="afip-ocs-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:10px;">
+      <div id="afip-panel-health"></div>
+      <div id="afip-panel-prediction"></div>
+      <div id="afip-panel-risk"></div>
+      <div id="afip-panel-mission-planner"></div>
+      <div id="afip-panel-navigation"></div>
+      <div id="afip-panel-mission-executive"></div>
+      <div id="afip-panel-decision"></div>
+      <div id="afip-panel-explainability"></div>
+      <div id="afip-panel-operator" style="grid-column: 1 / -1;"></div>
+      <div id="afip-panel-timeline" style="grid-column: 1 / -1;"></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="theory">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="tag">02 — Why it doesn't twist itself apart</div><h2>Counter-rotation cancels the moment</h2></div>
+    </div>
+    <div class="theory-grid">
+      <div class="theory-copy">
+        <p>Tilting a spinning rotor is a <strong>gyroscopic act</strong>: any rotor forced to change its spin-axis direction
+          reacts with a torque perpendicular to both the spin and the tilt. Tilt one duct on its own and the airframe
+          would twist around its boom.</p>
+        <p>The fix is to spin the left and right ducts in <strong>opposite directions</strong>. Tilt them at the same rate
+          and their gyroscopic reaction torques point opposite ways too — the net moment on the airframe cancels to zero
+          at every instant, which is why the status line reads "neutralized" through the whole transition.</p>
+        <p>Cancelling the <em>net</em> torque doesn't remove the <strong>stress on each spar</strong> though — each duct
+          mount still has to resist its own reaction torque individually. That's the spar torsional shear reading: it
+          spikes mid-transition, when the tilt rate itself peaks, and it's the number that actually limits how fast an
+          engineer would let this transition happen.</p>
+      </div>
+      <div class="formula-card">
+        <div class="formula-big">τ<span class="hi">_gyro</span> = K · Ω<span class="hi">_tilt</span></div>
+        <div class="formula-sub">
+          K — rotor inertia × spin rate (scales with payload)<br>
+          Ω_tilt — rate of change of tilt angle, dθ/dt<br><br>
+          τ_CW = +τ_gyro &nbsp;·&nbsp; τ_CCW = −τ_gyro<br>
+          Σ τ_net = τ_CW + τ_CCW = 0 (always)<br><br>
+          spar shear ≈ |τ_gyro| — peaks when Ω_tilt peaks,<br>
+          i.e. mid-transition, not at the tilt extremes.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer id="about">
+  <div class="wrap">
+    <span>HL-150 Simulation Suite — dual coaxial-duct tilt architecture.</span>
+    <span>Render: Canvas2D · physics-driven, not keyframed.</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const els = {
+    transdur: document.getElementById('transdur'),
+    payload: document.getElementById('payload'),
+    cruisespeed: document.getElementById('cruisespeed'),
+    cruisealt: document.getElementById('cruisealt'),
+    playBtn: document.getElementById('playBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    stage: document.getElementById('stageCanvas'),
+    chart: document.getElementById('chartCanvas'),
+    timeline: document.getElementById('timeline'),
+    playhead: document.getElementById('playhead'),
+    phaseLabel: document.getElementById('phaseLabel'),
+    timeLabel: document.getElementById('timeLabel'),
+    loopLabel: document.getElementById('loopLabel'),
+  };
+
+  const PHASE_NAMES = ['VTOL SPOOL-UP','VERTICAL CLIMB','AUTONOMOUS TRANSITION','HORIZONTAL CRUISE','REVERSE TRANSITION','VERTICAL DESCENT · LANDING'];
+  const PHASE_COLORS = ['#4fb3ff','#35e08a','#ffb020','#ff8a3d','#c792ff','#2fd9c4'];
+
+  const state = { t:0, playing:true, speed:1, dragging:false, droneSpeedPx: 0 };
+  const PIXELS_PER_METER_X = 3.5;
+  const GROUND_Y_OFFSET = 40;
+  let posCurve = [];
+  let totalDist = 0;
+  let worldObjects = [];
+  
+  function getDurations(){
+    const spool=2, climb=3, cruiseTail=4;
+    const trans = parseFloat(els.transdur.value) || 6;
+    const descTrans = trans, descend = climb;
+    return {spool, climb, trans, cruiseTail, descTrans, descend, total: spool+climb+trans+cruiseTail+descTrans+descend};
+  }
+
+  function getXForTime(t) {
+    const {total} = getDurations();
+    const frac = Math.max(0, Math.min(1, t / total));
+    const idx = Math.floor(frac * 500);
+    if(idx >= 500) return posCurve[posCurve.length-1].x;
+    const p0 = posCurve[idx];
+    const p1 = posCurve[Math.min(idx+1, posCurve.length-1)];
+    const localFrac = (t - p0.t) / (p1.t - p0.t || 1);
+    return p0.x + (p1.x - p0.x) * localFrac;
+  }
+  
+  function regenerateWorld() {
+    posCurve = [];
+    totalDist = 0;
+    const {total} = getDurations();
+    const POS_STEPS = 500;
+    const dt = total / POS_STEPS;
+    posCurve.push({t: 0, x: 0});
+    for(let i=1; i<=POS_STEPS; i++){
+       const s = computeState(i*dt);
+       const v_m_s = s.vel * 1000 / 3600;
+       totalDist += v_m_s * dt;
+       posCurve.push({t: i*dt, x: totalDist});
+    }
+    
+    worldObjects = [];
+    worldObjects.push({x: 0, type: 'pad', label: 'HQ'});
+    worldObjects.push({x: Math.min(80, totalDist*0.1), type: 'building', w: 40, h: 20});
+    worldObjects.push({x: Math.min(140, totalDist*0.15), type: 'crane', w: 20, h: 35});
+    
+    const midCount = 5;
+    for(let i=1; i<=midCount; i++){
+      let mx = totalDist * (0.2 + 0.5*(i/midCount));
+      if (i%2===0) {
+        worldObjects.push({x: mx, type: 'powerline', w: 10, h: 30});
+      } else {
+        worldObjects.push({x: mx, type: 'windturbine', w: 8, h: 38});
+      }
+    }
+    
+    worldObjects.push({x: totalDist - Math.min(150, totalDist*0.15), type: 'tree', w: 15, h: 25});
+    worldObjects.push({x: totalDist - Math.min(80, totalDist*0.08), type: 'building', w: 50, h: 18});
+    worldObjects.push({x: totalDist, type: 'pad', label: 'DEST'});
+  }
+
+  function easeOut(x){ return 1-Math.pow(1-x,2); }
+  function easeInOutCos(x){ return 0.5 - 0.5*Math.cos(Math.PI*x); }
+
+  function computeState(t){
+    const {spool,climb,trans,cruiseTail,descTrans,descend,total} = getDurations();
+    const payload = parseFloat(els.payload.value) || 80;
+    const cruiseSpeed = parseFloat(els.cruisespeed.value) || 120;
+    const ALT_CRUISE = parseFloat(els.cruisealt.value) || 42;
+    const VEL_CLIMB_END = 8;
+
+    let phase, localX;
+    let tilt=0, vel=0, alt=0, tiltRateDegPerSec=0;
+
+    const t1=spool, t2=spool+climb, t3=spool+climb+trans, t4=t3+cruiseTail, t5=t4+descTrans;
+
+    if(t < t1){
+      phase=0; localX = t/spool;
+      tilt = 90; vel = 0; alt = 0;
+    } else if(t < t2){
+      phase=1; localX = (t-t1)/climb;
+      tilt = 90;
+      vel = VEL_CLIMB_END*easeOut(localX);
+      alt = ALT_CRUISE*easeOut(localX);
+    } else if(t < t3){
+      phase=2; localX = (t-t2)/trans;
+      const e = easeInOutCos(localX);
+      tilt = 90*(1-e);
+      vel = VEL_CLIMB_END + (cruiseSpeed-VEL_CLIMB_END)*e;
+      alt = ALT_CRUISE;
+      const ep = 0.5*Math.PI*Math.sin(Math.PI*localX); 
+      tiltRateDegPerSec = -90*ep/trans;
+    } else if(t < t4){
+      phase=3; localX = (t-t3)/cruiseTail;
+      tilt = 0; vel = cruiseSpeed; alt = ALT_CRUISE;
+    } else if(t < t5){
+      phase=4; localX = (t-t4)/descTrans;
+      const e = easeInOutCos(localX);
+      tilt = 90*e;
+      vel = cruiseSpeed - (cruiseSpeed-VEL_CLIMB_END)*e;
+      alt = ALT_CRUISE;
+      const ep = 0.5*Math.PI*Math.sin(Math.PI*localX);
+      tiltRateDegPerSec = 90*ep/descTrans;
+    } else {
+      phase=5; localX = Math.min(1,(t-t5)/Math.max(0.0001, descend));
+      tilt = 90;
+      const de = easeOut(localX);
+      vel = VEL_CLIMB_END*(1-de);
+      alt = ALT_CRUISE*(1-de);
+    }
+
+    const omegaTiltRad = Math.abs(tiltRateDegPerSec) * Math.PI/180;
+    const K = 60 + payload*0.15;
+    const tauGyro = K * omegaTiltRad;
+
+    return { phase, localX, tilt, vel, alt, tauGyro, tauCW: tauGyro, tauCCW: -tauGyro };
+  }
+
+  function fitCanvas(cv){
+    const rect = cv.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    cv.width = rect.width*ratio; cv.height = rect.height*ratio;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+    return {ctx, w:rect.width, h:rect.height};
+  }
+
+  function hexToRgba(hex, a){
+    const v = parseInt(hex.slice(1),16);
+    const r=(v>>16)&255, g=(v>>8)&255, b=v&255;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  // ---------- Rendering Overhaul ----------
+  let scene, renderer, controls;
+  let activeCamera, camera3rd, cameraFPV;
+  let isFPV = false;
+  let droneGroup, leftNacelleGroup, rightNacelleGroup, leftRotor, rightRotor;
+  let leftLight, rightLight, leftMat, rightMat;
+  let worldGroup, scrollingObjects = [];
+
+  function init3D() {
+    renderer = new THREE.WebGLRenderer({ canvas: els.stage, antialias: true });
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    
+    const w = els.stage.clientWidth;
+    const h = els.stage.clientHeight || 420;
+    renderer.setSize(w, h, false);
+    
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.Fog(0x87CEEB, 200, 1000);
+    
+    camera3rd = new THREE.PerspectiveCamera(45, w / h, 0.1, 2000);
+    camera3rd.position.set(80, 40, 80);
+    camera3rd.lookAt(0, 0, 0);
+    
+    cameraFPV = new THREE.PerspectiveCamera(90, w / h, 0.1, 2000);
+    cameraFPV.position.set(0, 4, -12); // Mounted at the nose looking forward
+    
+    activeCamera = camera3rd;
+    
+    controls = new THREE.OrbitControls(camera3rd, renderer.domElement);
+    controls.maxPolarAngle = Math.PI / 2 - 0.01;
+    controls.enableDamping = true;
+    
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(100, 200, 50);
+    sun.castShadow = true;
+    sun.shadow.camera.top = 400;
+    sun.shadow.camera.bottom = -400;
+    sun.shadow.camera.left = -400;
+    sun.shadow.camera.right = 400;
+    sun.shadow.camera.far = 1500;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    scene.add(sun);
+
+    // ---- visible sun disc + soft halo ----
+    // Placed by projecting forward from camera3rd's actual view direction, offset upward by
+    // just under the vertical half-FOV, so it reliably lands inside the visible frustum
+    // near the top of the sky instead of behind/above the camera where it can't be seen.
+    const camForward = new THREE.Vector3().subVectors(new THREE.Vector3(0,0,0), camera3rd.position).normalize();
+    const worldUp = new THREE.Vector3(0,1,0);
+    const camRight = new THREE.Vector3().crossVectors(camForward, worldUp).normalize();
+    const camUp = new THREE.Vector3().crossVectors(camRight, camForward).normalize();
+
+    const sunDir = camForward.clone()
+        .add(camUp.clone().multiplyScalar(0.37))   // tilt up ~20°, safely under the 22.5° vertical half-FOV
+        .add(camRight.clone().multiplyScalar(0.09)) // small horizontal offset so it isn't dead-center on the drone
+        .normalize();
+    const sunDist = 900;
+    const sunPos = camera3rd.position.clone().add(sunDir.multiplyScalar(sunDist));
+    sunPos.y = Math.max(sunPos.y, 90); // keep it comfortably above the horizon
+
+    const sunCoreGeo = new THREE.SphereGeometry(40, 24, 24);
+    const sunCoreMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false, depthTest: false });
+    const sunMesh = new THREE.Mesh(sunCoreGeo, sunCoreMat);
+    sunMesh.position.copy(sunPos);
+    sunMesh.renderOrder = 999;
+    scene.add(sunMesh);
+
+    // layered translucent halo spheres for a soft glow (cheap alternative to a glow shader)
+    const haloSteps = [
+        { r: 58, color: 0xfff2c4, opacity: 0.5 },
+        { r: 80, color: 0xffe9a8, opacity: 0.32 },
+        { r: 112, color: 0xffe090, opacity: 0.18 },
+        { r: 155, color: 0xffd97a, opacity: 0.09 }
+    ];
+    haloSteps.forEach(step => {
+        const haloGeo = new THREE.SphereGeometry(step.r, 20, 20);
+        const haloMat = new THREE.MeshBasicMaterial({ color: step.color, transparent: true, opacity: step.opacity, depthWrite: false, depthTest: false, fog: false });
+        const halo = new THREE.Mesh(haloGeo, haloMat);
+        halo.position.copy(sunPos);
+        halo.renderOrder = 998;
+        scene.add(halo);
+    });
+    
+    worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+    
+    const grassGeo = new THREE.PlaneGeometry(2000, 2000);
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4d914d, roughness: 0.9, metalness: 0.1 });
+    const grass = new THREE.Mesh(grassGeo, grassMat);
+    grass.rotation.x = -Math.PI / 2;
+    grass.receiveShadow = true;
+    grass.position.y = -0.1;
+    worldGroup.add(grass); 
+    
+    const roadGeo = new THREE.PlaneGeometry(40, 2000);
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+    const road = new THREE.Mesh(roadGeo, roadMat);
+    road.rotation.x = -Math.PI / 2;
+    road.receiveShadow = true;
+    worldGroup.add(road); 
+    
+    for(let i=0; i<40; i++) {
+        const dashGeo = new THREE.PlaneGeometry(1, 10);
+        const dashMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const dash = new THREE.Mesh(dashGeo, dashMat);
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.y = 0.1;
+        dash.position.z = -1000 + i * 50;
+        worldGroup.add(dash);
+        scrollingObjects.push(dash);
+    }
+    
+    const buildingPalette = [0xd8853f, 0xc45c4a, 0xdcb04a, 0x8a9bb0, 0xb0725a, 0x6f8a99, 0xd9c19a, 0x9c7350, 0x7e97a8, 0xcf9752];
+    for(let i=0; i<15; i++) {
+        const bw = 20 + Math.random()*30;
+        const bh = 50 + Math.random()*150;
+        const bd = 20 + Math.random()*30;
+        const bGeo = new THREE.BoxGeometry(bw, bh, bd);
+        const bColor = buildingPalette[Math.floor(Math.random()*buildingPalette.length)];
+        const bMat = new THREE.MeshStandardMaterial({ 
+            color: bColor, 
+            roughness: 0.75, metalness: 0.15 
+        });
+        const building = new THREE.Mesh(bGeo, bMat);
+        building.position.x = (i%2===0 ? 1 : -1) * (40 + Math.random()*100);
+        building.position.y = bh / 2;
+        building.position.z = -800 + Math.random()*1000;
+        building.castShadow = true;
+        building.receiveShadow = true;
+        worldGroup.add(building);
+        scrollingObjects.push(building);
+
+        // roof cap, slightly darker than the body
+        const roofGeo = new THREE.BoxGeometry(bw*1.03, 3, bd*1.03);
+        const roofMat = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.9 });
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.set(building.position.x, bh + 1.5, building.position.z);
+        roof.castShadow = true;
+        worldGroup.add(roof);
+        scrollingObjects.push(roof);
+
+        // grid of rectangular glass panes on front & back faces, so buildings read as real facades
+        const winMat = new THREE.MeshStandardMaterial({ color: 0xbfe0ff, emissive: 0x223344, emissiveIntensity: 0.45, roughness: 0.35, metalness: 0.3, transparent:true, opacity:0.6 });
+        const cols = Math.max(2, Math.floor(bw/6));
+        const rows = Math.max(3, Math.floor(bh/9));
+        const paneW = (bw*0.82)/cols;
+        const paneH = (bh*0.82)/rows;
+        const paneGeo = new THREE.PlaneGeometry(paneW*0.78, paneH*0.7);
+        const gridStartX = -(bw*0.82)/2 + paneW/2;
+        const gridStartY = -(bh*0.82)/2 + paneH/2;
+        for(let c=0; c<cols; c++){
+            for(let r=0; r<rows; r++){
+                const px = gridStartX + c*paneW;
+                const py = gridStartY + r*paneH;
+                const paneFront = new THREE.Mesh(paneGeo, winMat);
+                paneFront.position.set(px, py, bd/2 + 0.15);
+                building.add(paneFront);
+                const paneBack = new THREE.Mesh(paneGeo, winMat);
+                paneBack.position.set(-px, py, -bd/2 - 0.15);
+                paneBack.rotation.y = Math.PI;
+                building.add(paneBack);
+            }
+        }
+    }
+
+    // ---- trees scattered across the grass on either side of the road ----
+    const foliagePalette = [0x3e7d3a, 0x4d914d, 0x2f6b3a, 0x5aa15a, 0x437a41];
+    for(let i=0; i<130; i++) {
+        const treeGroup = new THREE.Group();
+        const trunkH = 6 + Math.random()*6;
+        const trunkGeo = new THREE.CylinderGeometry(0.6, 0.9, trunkH, 8);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.95 });
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = trunkH/2;
+        trunk.castShadow = true;
+        trunk.receiveShadow = true;
+        treeGroup.add(trunk);
+
+        const foliageColor = foliagePalette[Math.floor(Math.random()*foliagePalette.length)];
+        const foliageMat = new THREE.MeshStandardMaterial({ color: foliageColor, roughness: 0.9, flatShading: true });
+        const tiers = 2 + Math.floor(Math.random()*2);
+        for(let j=0; j<tiers; j++) {
+            const r = 6 - j*1.4 + Math.random()*1.5;
+            const coneH = 8 - j*1.5;
+            const coneGeo = new THREE.ConeGeometry(r, coneH, 8);
+            const cone = new THREE.Mesh(coneGeo, foliageMat);
+            cone.position.y = trunkH + j*coneH*0.55 + coneH*0.4;
+            cone.castShadow = true;
+            treeGroup.add(cone);
+        }
+
+        // keep trees off the road (road is 40 wide, centered at x=0)
+        const side = Math.random() > 0.5 ? 1 : -1;
+        treeGroup.position.x = side * (25 + Math.random()*160);
+        treeGroup.position.z = -900 + Math.random()*1200;
+        const s = 0.8 + Math.random()*0.9;
+        treeGroup.scale.set(s,s,s);
+        worldGroup.add(treeGroup);
+        scrollingObjects.push(treeGroup);
+    }
+
+    // ---- lamp posts lining the edges of the road ----
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.5, metalness: 0.6 });
+    const lampGlowMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffdd88, emissiveIntensity: 1.1, roughness: 0.4 });
+    const armMat = poleMat;
+    for(let i=0; i<44; i++) {
+        const side = i%2===0 ? 1 : -1;
+        const lampGroup = new THREE.Group();
+
+        const poleH = 14;
+        const poleGeo = new THREE.CylinderGeometry(0.35, 0.45, poleH, 8);
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = poleH/2;
+        pole.castShadow = true;
+        lampGroup.add(pole);
+
+        // arm curving in toward the road
+        const armGeo = new THREE.CylinderGeometry(0.18, 0.18, 4, 6);
+        const arm = new THREE.Mesh(armGeo, armMat);
+        arm.rotation.z = Math.PI/2;
+        arm.position.set(-side*2, poleH - 0.3, 0);
+        lampGroup.add(arm);
+
+        // lamp head
+        const headGeo = new THREE.SphereGeometry(0.9, 10, 10);
+        const head = new THREE.Mesh(headGeo, lampGlowMat);
+        head.position.set(-side*3.8, poleH - 0.3, 0);
+        lampGroup.add(head);
+
+        lampGroup.position.x = side * 22;
+        lampGroup.position.z = -900 + i * (1800/44);
+        worldGroup.add(lampGroup);
+        scrollingObjects.push(lampGroup);
+    }
+    
+    for(let i=0; i<32; i++) {
+        const cloudGroup = new THREE.Group();
+
+        // pick a cloud archetype so the sky has variety instead of one repeated shape
+        const archetype = Math.random();
+        const isWispy = archetype < 0.25;
+        const isStratus = archetype >= 0.25 && archetype < 0.45;
+
+        const spreadX = isStratus ? 90 : (isWispy ? 30 : 50);
+        const spreadZ = isStratus ? 26 : (isWispy ? 16 : 30);
+        const baseCount = isWispy ? 3 + Math.floor(Math.random()*2) : 4 + Math.floor(Math.random()*3);
+        const topCount = isWispy ? 2 + Math.floor(Math.random()*3) : 5 + Math.floor(Math.random()*6);
+
+        // base layer: broad, flattened puffs tinted with a cool shadow tone on the underside
+        for(let j=0; j<baseCount; j++) {
+            const r = (isWispy ? 10 : 16) + Math.random()*16;
+            const cGeo = new THREE.SphereGeometry(r, 12, 10);
+            const shade = 0.76 + Math.random()*0.09;
+            const c = new THREE.Color(0xd7dde8).multiplyScalar(shade);
+            const cMat = new THREE.MeshStandardMaterial({ color: c, roughness: 1.0, flatShading: false, transparent: true, opacity: isWispy ? 0.6 : 0.86 });
+            const cMesh = new THREE.Mesh(cGeo, cMat);
+            cMesh.position.set((Math.random()-0.5)*spreadX, (Math.random()-0.5)*6 - 4, (Math.random()-0.5)*spreadZ);
+            cMesh.scale.set(1 + (isStratus?0.6:0), isWispy ? 0.35 : 0.55 + Math.random()*0.15, 1);
+            cloudGroup.add(cMesh);
+        }
+
+        // top layer: smaller brighter, sun-warmed puffs piled higher for volume
+        for(let j=0; j<topCount; j++) {
+            const r = (isWispy ? 7 : 10) + Math.random()*14;
+            const cGeo = new THREE.SphereGeometry(r, 14, 12);
+            // bias the top-lit side toward a warm sunlit tint, rest stays crisp white
+            const sunFacing = Math.random() < 0.5;
+            const baseTone = sunFacing ? new THREE.Color(0xfff8ea) : new THREE.Color(0xffffff);
+            const shade = 0.95 + Math.random()*0.07;
+            const c = baseTone.multiplyScalar(Math.min(1, shade));
+            const cMat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.92, flatShading: false, transparent: true, opacity: isWispy ? 0.65 : 0.93 });
+            const cMesh = new THREE.Mesh(cGeo, cMat);
+            cMesh.position.set((Math.random()-0.5)*spreadX*0.8, 4 + Math.random()*14, (Math.random()-0.5)*(spreadZ*0.75));
+            cMesh.scale.set(1, 0.75 + Math.random()*0.2, 1);
+            cloudGroup.add(cMesh);
+        }
+
+        cloudGroup.position.set((Math.random()-0.5)*1000, (isStratus ? 110 : 140) + Math.random()*130, -950 + Math.random()*1400);
+        cloudGroup.rotation.y = Math.random()*Math.PI*2;
+        const cs = (isWispy ? 0.5 : 0.7) + Math.random()*0.9;
+        cloudGroup.scale.set(cs, cs*0.85, cs);
+        worldGroup.add(cloudGroup);
+        scrollingObjects.push(cloudGroup);
+    }
+    
+    droneGroup = new THREE.Group();
+    scene.add(droneGroup);
+    droneGroup.add(cameraFPV); // Mount FPV camera to the drone!
+    droneGroup.scale.set(0.55, 0.55, 0.55);
+    
+    const fuseGeo = new THREE.BoxGeometry(12, 8, 30);
+    const fuseMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8, roughness: 0.2 });
+    const fuselage = new THREE.Mesh(fuseGeo, fuseMat);
+    fuselage.castShadow = true;
+    fuselage.receiveShadow = true;
+    droneGroup.add(fuselage);
+    
+    const sparGeo = new THREE.CylinderGeometry(1.5, 1.5, 40, 16);
+    const spar = new THREE.Mesh(sparGeo, fuseMat);
+    spar.rotation.z = Math.PI / 2;
+    spar.castShadow = true;
+    spar.receiveShadow = true;
+    droneGroup.add(spar);
+    
+    leftNacelleGroup = new THREE.Group();
+    rightNacelleGroup = new THREE.Group();
+    
+    const ductGeo = new THREE.TorusGeometry(8, 2, 16, 32);
+    leftMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.7, roughness: 0.3 });
+    rightMat = leftMat.clone();
+    
+    const leftDuct = new THREE.Mesh(ductGeo, leftMat); leftDuct.castShadow = true;
+    const rightDuct = new THREE.Mesh(ductGeo, rightMat); rightDuct.castShadow = true;
+    
+    const rotorGeo = new THREE.BoxGeometry(15, 2, 0.2);
+    const rotorMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
+    
+    leftRotor = new THREE.Group();
+    rightRotor = new THREE.Group();
+    for (let i=0; i<3; i++) {
+        const bladeL = new THREE.Mesh(rotorGeo, rotorMat); bladeL.rotation.z = i * (Math.PI * 2 / 3); bladeL.castShadow = true;
+        leftRotor.add(bladeL);
+        const bladeR = new THREE.Mesh(rotorGeo, rotorMat); bladeR.rotation.z = i * (Math.PI * 2 / 3); bladeR.castShadow = true;
+        rightRotor.add(bladeR);
+    }
+    
+    leftNacelleGroup.add(leftDuct); leftNacelleGroup.add(leftRotor);
+    leftNacelleGroup.position.set(-20, 0, 0); 
+    
+    rightNacelleGroup.add(rightDuct); rightNacelleGroup.add(rightRotor);
+    rightNacelleGroup.position.set(20, 0, 0); 
+    
+    leftLight = new THREE.PointLight(0x35e08a, 0, 30);
+    rightLight = new THREE.PointLight(0x35e08a, 0, 30);
+    leftNacelleGroup.add(leftLight);
+    rightNacelleGroup.add(rightLight);
+    
+    droneGroup.add(leftNacelleGroup);
+    droneGroup.add(rightNacelleGroup);
+    
+    droneGroup.position.set(0, 4, 0);
+    sun.target = droneGroup;
+    
+    // UI Button Listener
+    const fpvBtn = document.getElementById('fpvBtn');
+    if (fpvBtn) {
+        fpvBtn.addEventListener('click', (e) => {
+            isFPV = !isFPV;
+            activeCamera = isFPV ? cameraFPV : camera3rd;
+            e.target.textContent = isFPV ? '🎥 VIEW: FPV' : '🎥 VIEW: 3RD PERSON';
+            onWindowResize();
+        });
+    }
+    
+    window.addEventListener('resize', onWindowResize, false);
+  }
+
+  function onWindowResize() {
+    if (!renderer) return;
+    const w = els.stage.clientWidth;
+    const h = els.stage.clientHeight || 420;
+    
+    if (camera3rd) {
+        camera3rd.aspect = w / h;
+        camera3rd.updateProjectionMatrix();
+    }
+    if (cameraFPV) {
+        cameraFPV.aspect = w / h;
+        cameraFPV.updateProjectionMatrix();
+    }
+    
+    renderer.setSize(w, h, false);
+  }
+
+  function draw3DStage(s, dt) {
+    if (!renderer) init3D();
+    
+    droneGroup.position.y = 4 + s.alt * 1.5; 
+    
+    const v_m_s = s.vel * 1000 / 3600;
+    
+    if (s.vel > 0) {
+       scrollingObjects.forEach(obj => {
+           obj.position.z += v_m_s * dt * 2;
+           if (obj.position.z > 200) {
+               obj.position.z -= 1000; 
+           }
+       });
+    }
+    
+    const tiltRad = s.tilt * Math.PI / 180;
+    leftNacelleGroup.rotation.x = tiltRad;
+    rightNacelleGroup.rotation.x = tiltRad;
+    
+    const spinSpeed = 20;
+    leftRotor.rotation.z += spinSpeed * dt;
+    rightRotor.rotation.z -= spinSpeed * dt;
+    
+    let emColor = new THREE.Color(0x35e08a);
+    let emIntensity = 0;
+    
+    if (s.tauGyro > 40) {
+        emColor.setHex(0xff4f5e);
+        emIntensity = 1;
+    } else if (s.tauGyro > 22) {
+        emColor.setHex(0xffb020);
+        emIntensity = 0.8;
+    }
+    
+    leftMat.emissive = emColor;
+    leftMat.emissiveIntensity = emIntensity;
+    rightMat.emissive = emColor;
+    rightMat.emissiveIntensity = emIntensity;
+    
+    leftLight.color = emColor;
+    leftLight.intensity = emIntensity;
+    rightLight.color = emColor;
+    rightLight.intensity = emIntensity;
+    
+    if (!isFPV && controls) {
+        controls.update();
+    }
+    
+    renderer.render(scene, activeCamera);
+  }
+  // ---------- Chart ----------
+  function drawChart(){
+    const {ctx,w,h} = fitCanvas(els.chart);
+    ctx.clearRect(0,0,w,h);
+    const {total} = getDurations();
+    const pad = {l:34,r:12,t:14,b:18};
+    const plotW = w-pad.l-pad.r, plotH = h-pad.t-pad.b;
+
+    ctx.strokeStyle='rgba(255,255,255,0.06)';
+    for(let i=0;i<=3;i++){
+      const y = pad.t + plotH*i/3;
+      ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    }
+
+    const samples = 160;
+    const series = {vel:[], alt:[], tilt:[], shear:[]};
+    let maxVel=1,maxAlt=1,maxTilt=90,maxShear=1;
+    for(let i=0;i<samples;i++){
+      const tt = total*i/(samples-1);
+      const s = computeState(tt);
+      series.vel.push(s.vel); series.alt.push(s.alt); series.tilt.push(s.tilt); series.shear.push(s.tauGyro);
+      maxVel=Math.max(maxVel,s.vel); maxAlt=Math.max(maxAlt,s.alt); maxShear=Math.max(maxShear,s.tauGyro);
+    }
+    const limitIndex = Math.floor((state.t / total) * (samples - 1));
+    function plot(arr, max, color, limit){
+      ctx.beginPath();
+      for(let i=0;i<=limit;i++){
+        const x = pad.l + plotW*i/(arr.length-1);
+        const y = pad.t + plotH*(1 - arr[i]/(max||1));
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.strokeStyle=color; ctx.lineWidth=1.6; ctx.stroke();
+    }
+    plot(series.vel, maxVel, 'rgba(79,179,255,0.9)', limitIndex);
+    plot(series.alt, maxAlt, 'rgba(53,224,138,0.9)', limitIndex);
+    plot(series.tilt, maxTilt, 'rgba(255,255,255,0.35)', limitIndex);
+    plot(series.shear, maxShear, 'rgba(255,176,32,0.95)', limitIndex);
+
+    // current time marker
+    const curX = pad.l + plotW*(state.t/total);
+    ctx.strokeStyle='rgba(255,255,255,0.6)';
+    ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(curX,pad.t); ctx.lineTo(curX,h-pad.b); ctx.stroke();
+
+    // legend
+    ctx.font='10px JetBrains Mono';
+    const legend = [['velocity','rgba(79,179,255,0.9)'],['altitude','rgba(53,224,138,0.9)'],['tilt','rgba(255,255,255,0.5)'],['shear','rgba(255,176,32,0.95)']];
+    let lx = pad.l;
+    legend.forEach(([name,color])=>{
+      ctx.fillStyle=color; ctx.fillRect(lx,4,8,8);
+      ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText(name, lx+12, 12);
+      lx += ctx.measureText(name).width + 34;
+    });
+  }
+
+  // ---------- UI updates ----------
+  function updateUI(s){
+    const {total} = getDurations();
+    document.getElementById('val-transdur').textContent = parseFloat(els.transdur.value).toFixed(1)+' s';
+    document.getElementById('val-payload').textContent = els.payload.value+' kg';
+    document.getElementById('val-cruise').textContent = els.cruisespeed.value+' km/h';
+    document.getElementById('val-alt').textContent = els.cruisealt.value+' m';
+
+    document.getElementById('stat-phase').textContent = PHASE_NAMES[s.phase];
+    document.getElementById('stat-phase').style.color = PHASE_COLORS[s.phase];
+    document.getElementById('stat-vel').innerHTML = Math.round(s.vel)+'<span class="unit">km/h</span>';
+    document.getElementById('stat-tilt').innerHTML = s.tilt.toFixed(1)+'<span class="unit">°</span>';
+    document.getElementById('stat-alt').innerHTML = s.alt.toFixed(1)+'<span class="unit">m</span>';
+
+    const shearEl = document.getElementById('stat-shear');
+    shearEl.innerHTML = s.tauGyro.toFixed(1)+'<span class="unit">N·m</span>';
+    shearEl.style.color = s.tauGyro>40 ? 'var(--red)' : s.tauGyro>22 ? 'var(--amber)' : 'var(--green)';
+
+    document.getElementById('phaseLabel').textContent = 'PHASE '+(s.phase+1)+' · '+PHASE_NAMES[s.phase];
+    document.getElementById('timeLabel').textContent = 'T+'+state.t.toFixed(1).padStart(4,'0')+'s';
+    document.getElementById('loopLabel').textContent = total.toFixed(1)+'s loop';
+
+    document.getElementById('readout-taugyro').textContent = s.tauGyro.toFixed(1);
+    document.getElementById('readout-cw').textContent = (s.tauCW>=0?'+':'')+s.tauCW.toFixed(1);
+    document.getElementById('readout-ccw').textContent = s.tauCCW.toFixed(1);
+    document.getElementById('readout-net').textContent = (s.tauCW+s.tauCCW).toFixed(1);
+
+    const log = document.getElementById('statusLog');
+    const line1 = document.getElementById('statusLine');
+    const sub = document.getElementById('statusSub');
+    log.classList.remove('warn','danger');
+    if(s.tauGyro>40){
+      log.classList.add('danger');
+      line1.textContent='[STATUS: HIGH SPAR SHEAR — REDUCE TRANSITION RATE]';
+      sub.textContent='The tilt rate is changing too fast — each duct mount is now resisting more reaction torque than it comfortably should. Slow the transition down.';
+    } else if(s.tauGyro>22){
+      log.classList.add('warn');
+      line1.textContent='[STATUS: TRANSITION ACTIVE — SHEAR WITHIN LIMITS]';
+      sub.textContent='The rotors are actively tilting, so each duct mount is carrying real reaction torque — still inside the safe range, but climbing.';
+    } else {
+      line1.textContent='[STATUS: PRECESSION NEUTRALIZED — CW/CCW HARMONIC BALANCE]';
+      sub.textContent='Both ducts tilt at the same rate but spin in opposite directions, so their gyroscopic reaction torques cancel out at the airframe.';
+    }
+
+    // timeline segments
+    const {spool,climb,trans,cruiseTail,descTrans,descend} = getDurations();
+    const segs = els.timeline.querySelectorAll('.tl-seg');
+    const durs = [spool,climb,trans,cruiseTail,descTrans,descend];
+    segs.forEach((seg,i)=>{
+      seg.style.flex = durs[i];
+      seg.classList.toggle('active', i===s.phase);
+      seg.style.background = i===s.phase ? PHASE_COLORS[i] : 'rgba(255,255,255,0.03)';
+    });
+    els.playhead.style.left = (100*state.t/total)+'%';
+  }
+
+  // ---------- Loop ----------
+  let lastT = performance.now();
+  function loop(now){
+    try {
+      const dt = Math.min(0.05, (now-lastT)/1000); lastT = now;
+      const {total} = getDurations();
+      if(state.playing && !state.dragging){
+        state.t = (state.t + dt*state.speed) % total;
+      }
+      const s = computeState(state.t);
+
+      // ---- AFIP :: Evidence Integration (Phase 2, additive only) ----
+      // Simulator remains the sole owner of physics/motion below; this
+      // block only hands a read-only telemetry snapshot to AFIP.
+      if (window.AFIP && AFIP.EvidenceAdapter && AFIP.WorldStateEngine) {
+        AFIP.EvidenceAdapter.ingest({
+          t: state.t,
+          dt: dt,
+          playing: state.playing,
+          speed: state.speed,
+          phase: s.phase,
+          phaseName: PHASE_NAMES[s.phase],
+          localX: s.localX,
+          tilt: s.tilt,
+          vel: s.vel,
+          alt: s.alt,
+          tauGyro: s.tauGyro,
+          tauCW: s.tauCW,
+          tauCCW: s.tauCCW,
+          payload: parseFloat(els.payload.value) || 80,
+          cruiseSpeedSetting: parseFloat(els.cruisespeed.value) || 120,
+          cruiseAltSetting: parseFloat(els.cruisealt.value) || 42,
+          totalDist: totalDist,
+          distanceTraveled: getXForTime(state.t)
+        });
+        var afipSnapshot = AFIP.WorldStateEngine.publish();
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 4 — Health Monitor) ----
+        // Health Monitor reads the just-published Snapshot (telemetry
+        // only) and hands back a Health Assessment. It publishes its own
+        // Health.* fields back into the World State as Evidence Records
+        // (see health-monitor.js) — never by mutating afipSnapshot, which
+        // stays frozen/immutable per cycle. A second publish() seals a
+        // complete snapshot (telemetry + health) for this same frame so
+        // the UI/console can inspect one consistent picture.
+        var afipHealth = null;
+        if (AFIP.HealthMonitor) {
+          afipHealth = AFIP.HealthMonitor.update(afipSnapshot);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 5 — Prediction Engine) ----
+        // Consumes the Snapshot plus this cycle's Health Assessment
+        // directly (not re-read from the Snapshot's Health.* fields,
+        // which only reflect last cycle's publish) so ETA/energy/health
+        // -degradation forecasts are always built on the freshest
+        // Health judgment available this frame.
+        var afipPrediction = null;
+        if (AFIP.PredictionEngine) {
+          afipPrediction = AFIP.PredictionEngine.update(afipSnapshot, afipHealth);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 6 — Risk Engine) ----
+        // Sole producer of the Risk object. Consumes the Snapshot plus
+        // this cycle's Health and Prediction Assessments directly, same
+        // freshness rationale as the Prediction Engine above.
+        var afipRisk = null;
+        if (AFIP.RiskEngine) {
+          afipRisk = AFIP.RiskEngine.update(afipSnapshot, afipHealth, afipPrediction);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 10 — Operator Commands) ----
+        // Read-only per-cycle hook (matches the loop convention); the
+        // real entry point is AFIP.OperatorCommands.submit(), called
+        // from UI controls elsewhere. Included here purely so a pending
+        // request is observable every cycle, same as other modules.
+        if (AFIP.OperatorCommands) {
+          AFIP.OperatorCommands.update(afipSnapshot);
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 10 — Mission Planner) ----
+        // Publishes the Mission Definition (waypoints, alternate landing
+        // sites, duration/energy estimates) that Navigation and Decision
+        // Engine's constraint checks read below — must run before both.
+        var afipMissionPlan = null;
+        if (AFIP.MissionPlanner) {
+          afipMissionPlan = AFIP.MissionPlanner.update(afipSnapshot);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 10 — Navigation) ----
+        // Route progress, waypoint arrival, ETA. Reads the waypoint plan
+        // Mission Planner just published above.
+        var afipNavigation = null;
+        if (AFIP.NavigationIntelligence) {
+          afipNavigation = AFIP.NavigationIntelligence.update(afipSnapshot, afipPrediction);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 7 — Mission Executive) ----
+        // Proposer only (per 4__AFIP_Mission_Executive.md §0) — reads the
+        // Snapshot plus this cycle's Health/Prediction Assessments and
+        // produces a proposed intent + justification. It never writes
+        // back into World State and has no path to the flight-control
+        // boundary that does not pass through the Decision Engine below.
+        var afipMissionExecutive = null;
+        if (AFIP.MissionExecutive) {
+          afipMissionExecutive = AFIP.MissionExecutive.update(afipSnapshot, afipHealth, afipPrediction);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 8 — Decision Engine) ----
+        // Arbitration — architecturally distinct from the Mission
+        // Executive's proposal step above. Accepts, modifies, or
+        // rejects the proposal against deterministic constraint checks
+        // and this cycle's Risk Assessment, then reports its outcome
+        // back into the Mission Executive's continuity state.
+        var afipDecision = null;
+        if (AFIP.DecisionEngine) {
+          afipDecision = AFIP.DecisionEngine.update(afipSnapshot, afipMissionExecutive, afipRisk);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 9 — Explainability Engine) ----
+        // Pure renderer of the Mission Executive justification set and
+        // the Decision Engine's arbitration outcome — introduces no new
+        // judgment. Every autonomous decision this cycle now carries an
+        // explanation before it is considered complete.
+        if (AFIP.ExplainabilityEngine) {
+          AFIP.ExplainabilityEngine.update(afipSnapshot, afipMissionExecutive, afipDecision);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+
+        // ---- AFIP :: Reasoning Pipeline (Phase 10 — Mission Timeline) ----
+        // Event-driven history: records phase transitions, waypoint
+        // arrivals, and Decision Engine outcome changes for this cycle.
+        // Explainability's own output was already handed to it directly
+        // via AFIP.MissionTimeline.record() inside explainability.js above.
+        if (AFIP.MissionTimeline) {
+          AFIP.MissionTimeline.update(afipSnapshot, afipDecision, afipNavigation);
+          afipSnapshot = AFIP.WorldStateEngine.publish();
+        }
+        // ---- end AFIP reasoning pipeline ----
+      }
+      // ---- end AFIP block ----
+
+      draw3DStage(s, dt);
+      drawChart();
+      updateUI(s);
+    } catch(e) {
+      console.error(e);
+      document.body.innerHTML += '<div style="position:fixed;top:0;left:0;background:red;padding:10px;z-index:9999;">LOOP ERROR: ' + e.message + '</div>';
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Events ----------
+  [els.transdur, els.payload, els.cruisespeed, els.cruisealt].forEach(el=>{
+    el.addEventListener('input', regenerateWorld);
+  });
+  window.addEventListener('resize', ()=>{});
+
+  els.playBtn.addEventListener('click', ()=>{
+    state.playing = !state.playing;
+    els.playBtn.textContent = state.playing ? '⏸ Playing' : '▶ Paused';
+    els.playBtn.classList.toggle('on', state.playing);
+  });
+  els.resetBtn.addEventListener('click', ()=>{
+    state.t = 0;
+    els.transdur.value=6; els.payload.value=80; els.cruisespeed.value=120; els.cruisealt.value=75;
+    regenerateWorld();
+  });
+  document.querySelectorAll('.speed-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.speed-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      state.speed = parseFloat(btn.dataset.speed);
+    });
+  });
+
+  function scrubFromEvent(e){
+    const rect = els.timeline.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const frac = Math.min(1, Math.max(0, (clientX-rect.left)/rect.width));
+    const {total} = getDurations();
+    state.t = frac*total;
+  }
+  els.timeline.addEventListener('pointerdown', (e)=>{ state.dragging=true; scrubFromEvent(e); });
+  window.addEventListener('pointermove', (e)=>{ if(state.dragging) scrubFromEvent(e); });
+  window.addEventListener('pointerup', ()=>{ state.dragging=false; });
+
+  regenerateWorld();
+
+  // ---- AFIP :: Phase 11 — UI panel mounting (render-only) ----
+  // Constructs each panel against its DOM root; every panel's own
+  // constructor subscribes itself to the relevant bus event(s), so
+  // from here on panels update themselves as the reasoning pipeline
+  // runs each frame. This block performs no reasoning and never calls
+  // any AFIP.* module's update() — only panel construction, plus one
+  // optional initial pull-render from each module's own getLatest() so
+  // panels aren't blank before the first frame of a fresh page load.
+  if (window.AFIP && AFIP.UI) {
+    var afipPanels = {
+      health: new AFIP.UI.HealthPanel(document.getElementById('afip-panel-health')),
+      prediction: new AFIP.UI.PredictionPanel(document.getElementById('afip-panel-prediction')),
+      risk: new AFIP.UI.RiskPanel(document.getElementById('afip-panel-risk')),
+      missionPlanner: new AFIP.UI.MissionPlannerPanel(document.getElementById('afip-panel-mission-planner')),
+      navigation: new AFIP.UI.NavigationPanel(document.getElementById('afip-panel-navigation')),
+      missionExecutive: new AFIP.UI.MissionPanel(document.getElementById('afip-panel-mission-executive')),
+      decision: new AFIP.UI.DecisionConsole(document.getElementById('afip-panel-decision')),
+      explainability: new AFIP.UI.ExplainabilityPanel(document.getElementById('afip-panel-explainability')),
+      operator: new AFIP.UI.OperatorConsole(document.getElementById('afip-panel-operator')),
+      timeline: new AFIP.UI.TimelinePanel(document.getElementById('afip-panel-timeline'))
+    };
+    // Initial paint from whatever each module already has (all null pre-mission — panels render their own "no data yet" state).
+    afipPanels.health.render(AFIP.HealthMonitor && AFIP.HealthMonitor.getLatest());
+    afipPanels.prediction.render(AFIP.PredictionEngine && AFIP.PredictionEngine.getLatest());
+    afipPanels.risk.render(AFIP.RiskEngine && AFIP.RiskEngine.getLatest());
+    afipPanels.missionPlanner.render(AFIP.MissionPlanner && AFIP.MissionPlanner.getLatest());
+    afipPanels.navigation.render(AFIP.NavigationIntelligence && AFIP.NavigationIntelligence.getLatest());
+    afipPanels.missionExecutive.render(AFIP.MissionExecutive && AFIP.MissionExecutive.getLatest());
+    afipPanels.decision.render(AFIP.DecisionEngine && AFIP.DecisionEngine.getLatest());
+    afipPanels.explainability.render(AFIP.ExplainabilityEngine && AFIP.ExplainabilityEngine.getLatest());
+    afipPanels.operator.render(AFIP.OperatorCommands && AFIP.OperatorCommands.getLatest());
+    afipPanels.timeline.render(null);
+  }
+  // ---- end AFIP UI panel mounting ----
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "flight-intelligence-dashboard",
+  "version": "1.0.0",
+  "description": "Futuristic Autonomous Flight Intelligence Platform Dashboard concept inspired by Anduril, SpaceX, NASA, and Palantir.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vite": "^4.4.9"
+  }
+}

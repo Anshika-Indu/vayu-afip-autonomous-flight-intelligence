@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous Flight Intelligence Platform | NASA & Anduril Style Telemetry</title>
+  
+  <!-- Fonts: Inter for UI, JetBrains Mono for telemetry/data -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet CSS for live map -->
+  <link rel="stylesheet" href="lib/leaflet.css" />
+  
+  <!-- Dashboard CSS -->
+  <link rel="stylesheet" href="app.css">
+  
+  <!-- Lucide Icons (loaded locally, before main script) -->
+  <script src="lib/lucide.min.js"></script>
+  
+  <!-- Three.js for 3D drone rendering -->
+  <script src="lib/three.min.js"></script>
+  
+  <!-- Leaflet.js for map -->
+  <script src="lib/leaflet.js"></script>
+</head>
+<body>
+
+  <!-- Self-Debugging Script for Netlify Environment -->
+  <script>
+    (function() {
+      window.addEventListener('error', function(e) {
+        const logs = document.getElementById('console-logs');
+        if (!logs) return;
+        const line = document.createElement('div');
+        line.className = 'log-line error-line';
+        
+        if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+          const url = e.target.src || e.target.href;
+          line.textContent = `[CRITICAL] FAILED TO LOAD SYSTEM SUBSYSTEM: ${url.split('/').pop()}`;
+        } else {
+          line.textContent = `[CRITICAL] RUNTIME: ${e.message} at ${e.filename ? e.filename.split('/').pop() : 'unknown'}:${e.lineno || 0}`;
+        }
+        logs.appendChild(line);
+        logs.scrollTop = logs.scrollHeight;
+      }, true);
+    })();
+  </script>
+
+  <!-- Root Container -->
+  <div id="app-container">
+    
+    <!-- Top System Header -->
+    <header class="system-header">
+      <div class="header-left">
+        <div class="logo-area">
+          <span class="logo-bracket">[</span>
+          <span class="logo-text">FLIGHT_INTEL_V5</span>
+          <span class="logo-bracket">]</span>
+        </div>
+        <div class="header-divider"></div>
+        <div class="drone-id-badge">
+          <span class="label">UNIT:</span>
+          <span class="value" id="drone-tail-number">ARES-V2 // TAIL-88</span>
+        </div>
+      </div>
+      
+      <div class="header-middle">
+        <div class="status-indicator-group">
+          <div class="indicator" id="ind-mode">
+            <span class="dot pulse-green"></span>
+            <span class="text">AI AUTONOMOUS</span>
+          </div>
+          <div class="indicator" id="ind-gps">
+            <span class="dot green"></span>
+            <span class="text">RTK FIXED (31 SV)</span>
+          </div>
+          <div class="indicator" id="ind-comms">
+            <span class="dot green"></span>
+            <span class="text">SAT-LINK: 98ms</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="telemetry-compact">
+          <div class="metric">
+            <span class="lbl">SYS TIME (UTC)</span>
+            <span class="val" id="time-utc">19:42:05</span>
+          </div>
+          <div class="metric">
+            <span class="lbl">MISSION TIME</span>
+            <span class="val" id="mission-elapsed">00:34:12</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid Dashboard Layout -->
+    <main class="dashboard-grid">
+      
+      <!-- LEFT COLUMN -->
+      <section class="grid-column col-left">
+        
+        <!-- Mission Info Panel -->
+        <div class="panel telemetry-card" id="panel-mission-state">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="navigation" class="panel-icon"></i>
+              <h2>FLIGHT STATUS & MISSION</h2>
+            </div>
+            <span class="panel-tag status-nominal">EN ROUTE</span>
+          </div>
+          <div class="panel-body">
+            <div class="flight-metrics-grid">
+              <div class="metric-box">
+                <span class="metric-label">GROUND SPEED</span>
+                <span class="metric-value" id="val-speed">48.2 <span class="unit">kt</span></span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">ALTITUDE (AGL)</span>
+                <span class="metric-value" id="val-alt">328 <span class="unit">ft</span></span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">VERTICAL SPEED</span>
+                <span class="metric-value" id="val-vspeed">+0.5 <span class="unit">m/s</span></span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">PITCH / ROLL</span>
+                <span class="metric-value" id="val-attitude">1.5° / -2.1°</span>
+              </div>
+            </div>
+            
+            <div class="progress-bar-container">
+              <div class="progress-labels">
+                <span>WP-03 (SECTOR 4)</span>
+                <span id="mission-pct-label">74%</span>
+                <span>WP-04 (TERMINAL)</span>
+              </div>
+              <div class="progress-track">
+                <div class="progress-fill" id="mission-progress-bar" style="width: 74%;"></div>
+              </div>
+            </div>
+
+            <div class="mission-timeline">
+              <div class="timeline-step completed">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <span class="time">00:00</span>
+                  <span class="desc">Takeoff: Base Alpha</span>
+                </div>
+              </div>
+              <div class="timeline-step completed">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <span class="time">00:12</span>
+                  <span class="desc">WP1: Altitude lock @ 350ft</span>
+                </div>
+              </div>
+              <div class="timeline-step active">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <span class="time">00:26</span>
+                  <span class="desc">WP2 -> WP3: Transit Sector 4</span>
+                </div>
+              </div>
+              <div class="timeline-step upcoming">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <span class="time">ETA 00:46</span>
+                  <span class="desc">WP4: Cargo Drop Down-hook</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- System AI Status & Explainability -->
+        <div class="panel telemetry-card" id="panel-ai-explain">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="cpu" class="panel-icon"></i>
+              <h2>AI EXPLAINABILITY & WORLD MODEL</h2>
+            </div>
+            <div class="confidence-badge">
+              <span class="lbl">CONF:</span>
+              <span class="val" id="val-confidence">98.4%</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <!-- Active Decision Explainability -->
+            <div class="explainability-box">
+              <div class="explain-header">
+                <span class="explain-label">ACTIVE OBJECTIVE BEHAVIOR</span>
+                <span class="explain-timestamp" id="explain-time">19:42:01</span>
+              </div>
+              <p class="explain-text" id="explain-message">
+                Maintaining standard trajectory corridor. Correcting roll matrix for 12kt crosswind from 280° (bearing West). Altitude compensation set to +2.4% throttle output to account for localized thermals. Obstacle scan returns safe margins within 300m cylinder.
+              </p>
+            </div>
+
+            <!-- AI Modules Status Grid -->
+            <div class="modules-status-grid">
+              <div class="module-status-item green" id="mod-fusion">
+                <span class="dot"></span>
+                <span class="name">SENSOR_FUSION</span>
+                <span class="status">OK</span>
+              </div>
+              <div class="module-status-item green" id="mod-nav">
+                <span class="dot"></span>
+                <span class="name">NAV_PLANNER</span>
+                <span class="status">OK</span>
+              </div>
+              <div class="module-status-item green" id="mod-control">
+                <span class="dot"></span>
+                <span class="name">FLIGHT_CONTROL</span>
+                <span class="status">OK</span>
+              </div>
+              <div class="module-status-item green" id="mod-perception">
+                <span class="dot"></span>
+                <span class="name">PERCEPTION_NET</span>
+                <span class="status">OK</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Environment & Weather Panel -->
+        <div class="panel telemetry-card" id="panel-environment">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="cloud-sun" class="panel-icon"></i>
+              <h2>ENVIRONMENT & METAR</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="env-metrics-grid">
+              <div class="env-metric-item">
+                <span class="label">CROSSWIND</span>
+                <span class="value" id="val-wind">12.4 <span class="unit">kts / 280°</span></span>
+              </div>
+              <div class="env-metric-item">
+                <span class="label">TEMPERATURE</span>
+                <span class="value" id="val-temp">16.8°C <span class="unit">(ISA +2.4°)</span></span>
+              </div>
+              <div class="env-metric-item">
+                <span class="label">AIR DENSITY</span>
+                <span class="value">1.189 <span class="unit">kg/m³</span></span>
+              </div>
+              <div class="env-metric-item">
+                <span class="label">PRECIPITATION</span>
+                <span class="value" id="val-precip">0.0 <span class="unit">mm/hr</span></span>
+              </div>
+            </div>
+            <!-- Wind vector widget -->
+            <div class="wind-vector-widget">
+              <div class="compass-circle">
+                <div class="compass-arrow" id="wind-arrow" style="transform: rotate(280deg);"></div>
+                <div class="compass-labels">
+                  <span class="lbl-n">N</span>
+                  <span class="lbl-e">E</span>
+                  <span class="lbl-s">S</span>
+                  <span class="lbl-w">W</span>
+                </div>
+              </div>
+              <div class="wind-vector-meta">
+                <span class="title">WIND DIRECTION ANALYSIS</span>
+                <p>Drone trajectory oriented at 45° (NE). Wind is hitting drone portside-rear flank. Autopilot compensating by applying +1.2° pitch and counter-yaw torque to maintain ground track.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- CENTER COLUMN (Live Map, World Model, Console) -->
+      <section class="grid-column col-center">
+        
+        <!-- Live Map Card -->
+        <div class="panel map-card" id="panel-live-map">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="map" class="panel-icon"></i>
+              <h2>TACTICAL LIVE MAP</h2>
+            </div>
+            <div class="map-controls-compact">
+              <button class="map-btn active" id="btn-toggle-radar">RADAR LAYERING</button>
+              <button class="map-btn" id="btn-toggle-geofence">GEOFENCE</button>
+            </div>
+          </div>
+          <div class="panel-body map-container-wrapper">
+            <!-- Map Container -->
+            <div id="leaflet-map"></div>
+          </div>
+        </div>
+
+        <!-- Lower Center Panel: Splits between LiDAR World Model & Operator Command Console -->
+        <div class="center-bottom-split">
+          
+          <!-- World Model (LiDAR Visualizer) -->
+          <div class="panel lidar-card" id="panel-world-model">
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <i data-lucide="view" class="panel-icon"></i>
+                <h2>WORLD MODEL LIDAR SCAN (3D PROJECTION)</h2>
+              </div>
+              <span class="panel-tag tracking">SWEEP ACTIVE</span>
+            </div>
+            <div class="panel-body lidar-container-wrapper">
+              <canvas id="lidar-canvas"></canvas>
+              <div class="lidar-legend">
+                <span class="legend-item"><span class="color-dot yellow"></span> Safe Corridor</span>
+                <span class="legend-item"><span class="color-dot red"></span> Obstacle/Terrain</span>
+                <span class="legend-item"><span class="color-dot teal"></span> Flight Path</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Operator Console / CLI -->
+          <div class="panel console-card" id="panel-operator-console">
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <i data-lucide="terminal" class="panel-icon"></i>
+                <h2>TACTICAL OPERATOR CONSOLE</h2>
+              </div>
+              <span class="terminal-status">ONLINE / SECURE</span>
+            </div>
+            <div class="panel-body console-body">
+              <div class="console-log-output" id="console-logs">
+                <div class="log-line system-line">[19:08:12] INITIALIZING ARES-V2 FLIGHT SUBSYSTEMS...</div>
+                <div class="log-line success-line">[19:08:14] RTK POSITION FIXED: 37.7749° N, 122.4194° W</div>
+                <div class="log-line system-line">[19:08:15] ENABLING COLLISION AVOIDANCE MATRIX V4</div>
+                <div class="log-line info-line">[19:08:18] SECURE LINK ESTABLISHED VIA STARLINK SECTOR 18</div>
+                <div class="log-line success-line">[19:08:20] PAYLOAD STATUS: 1200kg SECURED - HYDRAULIC PRESSURE NOMINAL</div>
+                <div class="log-line system-line">[19:08:22] FLIGHT STATE CHANGED: RUNWAY_TAKEOFF</div>
+                <div class="log-line success-line">[19:08:35] DEPARTED BASE ALPHA. CLIMBING TO WAYPOINT 1</div>
+                <div class="log-line info-line">[19:12:00] AUTOPILOT REACHED WP1 (350ft). ROTOR DYNAMICS NOMINAL.</div>
+                <div class="log-line info-line">[19:26:00] TRANSIT TO WP2 COMPLETED. CURRENT HEADING 45° NE.</div>
+                <div class="log-line system-line">[19:42:00] TRANSIT CORRIDOR ADJUSTED (+2.4m NORTH) TO BYPASS THERMAL ANOMALY.</div>
+              </div>
+              <div class="console-input-line">
+                <span class="prompt">ares_v2_cmd::></span>
+                <input type="text" id="console-input" placeholder="Type command... (e.g. 'help', 'status', 'wind 30', 'fault 3')" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+          
+        </div>
+
+      </section>
+
+      <!-- RIGHT COLUMN -->
+      <section class="grid-column col-right">
+        
+        <!-- 3D Drone Telemetry Visualization -->
+        <div class="panel drone-3d-card" id="panel-drone-3d">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="box" class="panel-icon"></i>
+              <h2>3D TELEMETRY & ATTITUDE</h2>
+            </div>
+            <div class="attitude-indicators">
+              <div class="att-indicator">P: <span id="val-pitch">1.5°</span></div>
+              <div class="att-indicator">R: <span id="val-roll">-2.1°</span></div>
+              <div class="att-indicator">Y: <span id="val-yaw">45.0°</span></div>
+            </div>
+          </div>
+          <div class="panel-body drone-3d-container-wrapper">
+            <!-- 3D Canvas -->
+            <div id="three-drone-container"></div>
+            
+            <div class="overlay-3d-instructions">
+              <span>DRAG TO ROTATE // SCROLL TO ZOOM</span>
+            </div>
+
+            <!-- Health overlays -->
+            <div class="motor-grid-overlay">
+              <div class="motor-indicator" id="motor-1"><span class="lbl">M1</span><span class="val green">95%</span></div>
+              <div class="motor-indicator" id="motor-2"><span class="lbl">M2</span><span class="val green">94%</span></div>
+              <div class="motor-indicator" id="motor-3"><span class="lbl">M3</span><span class="val green">96%</span></div>
+              <div class="motor-indicator" id="motor-4"><span class="lbl">M4</span><span class="val green">95%</span></div>
+              <div class="motor-indicator" id="motor-5"><span class="lbl">M5</span><span class="val green">95%</span></div>
+              <div class="motor-indicator" id="motor-6"><span class="lbl">M6</span><span class="val green">96%</span></div>
+              <div class="motor-indicator" id="motor-7"><span class="lbl">M7</span><span class="val green">94%</span></div>
+              <div class="motor-indicator" id="motor-8"><span class="lbl">M8</span><span class="val green">95%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Battery Health & Power Grid -->
+        <div class="panel telemetry-card" id="panel-power-grid">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="zap" class="panel-icon"></i>
+              <h2>POWER MATRIX & BMS</h2>
+            </div>
+            <span class="panel-tag status-nominal" id="bms-main-tag">82.4V NOMINAL</span>
+          </div>
+          <div class="panel-body">
+            <div class="power-summary">
+              <div class="battery-visual">
+                <div class="battery-shell">
+                  <div class="battery-fluid" id="battery-fluid-level" style="width: 68%;"></div>
+                </div>
+                <span class="pct" id="val-battery-pct">68%</span>
+              </div>
+              <div class="power-rates">
+                <div class="rate-item">
+                  <span class="lbl">CURRENT DRAW</span>
+                  <span class="val" id="val-power-draw">165.2 <span class="unit">A</span></span>
+                </div>
+                <div class="rate-item">
+                  <span class="lbl">REMAINING LIFE</span>
+                  <span class="val" id="val-power-remaining">18.4 <span class="unit">min</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Battery Cell Matrix -->
+            <div class="cell-matrix-title">BMS CELL TEMPERATURES (°C)</div>
+            <div class="cell-grid">
+              <div class="cell-block green">C1: 34.2</div>
+              <div class="cell-block green">C2: 34.5</div>
+              <div class="cell-block green">C3: 33.8</div>
+              <div class="cell-block green">C4: 34.1</div>
+              <div class="cell-block green">C5: 35.0</div>
+              <div class="cell-block green">C6: 34.6</div>
+              <div class="cell-block green">C7: 34.2</div>
+              <div class="cell-block green">C8: 34.4</div>
+              <div class="cell-block green">C9: 33.9</div>
+              <div class="cell-block green">C10: 34.0</div>
+              <div class="cell-block green">C11: 34.5</div>
+              <div class="cell-block green">C12: 34.2</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cargo & Payload Status -->
+        <div class="panel telemetry-card" id="panel-cargo">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="package" class="panel-icon"></i>
+              <h2>CARGO BAY & HYDRAULICS</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="cargo-grid">
+              <div class="cargo-item">
+                <span class="lbl">PAYLOAD WEIGHT</span>
+                <span class="val">1,200 kg <span class="unit">/ 1,500 Max</span></span>
+              </div>
+              <div class="cargo-item">
+                <span class="lbl">CLAMPING FORCES</span>
+                <span class="val green" id="val-clamping">100% SECURE</span>
+              </div>
+              <div class="cargo-item">
+                <span class="lbl">CENTER OF GRAVITY</span>
+                <span class="val">X: +0.02m / Y: -0.01m</span>
+              </div>
+              <div class="cargo-item">
+                <span class="lbl">HYDRAULIC PRESSURE</span>
+                <span class="val">3,120 psi <span class="unit">(NOMINAL)</span></span>
+              </div>
+            </div>
+            
+            <div class="cargo-visual-bracket">
+              <div class="cargo-visual-box">
+                <span class="text">CARGO CONTAINER IN-CLAMP</span>
+                <div class="sensor-beams">
+                  <span class="beam laser-left"></span>
+                  <span class="beam laser-right"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Decision History & AI Action Log -->
+        <div class="panel telemetry-card" id="panel-decision-history">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <i data-lucide="history" class="panel-icon"></i>
+              <h2>DECISION HISTORY LOG</h2>
+            </div>
+          </div>
+          <div class="panel-body decision-history-body">
+            <table class="decision-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>DECISION CODE</th>
+                  <th>REASONING</th>
+                  <th>RESULT</th>
+                </tr>
+              </thead>
+              <tbody id="decision-history-rows">
+                <tr>
+                  <td>19:08</td>
+                  <td class="code">TAKEOFF_INIT</td>
+                  <td>Launch sequence verification successful.</td>
+                  <td><span class="badge badge-success">OK</span></td>
+                </tr>
+                <tr>
+                  <td>19:12</td>
+                  <td class="code">ALTITUDE_HOLD</td>
+                  <td>Target 350ft AGL attained. Adjusting rotor trim.</td>
+                  <td><span class="badge badge-success">OK</span></td>
+                </tr>
+                <tr>
+                  <td>19:25</td>
+                  <td class="code">CROSSWIND_COMP</td>
+                  <td>Wind speed > 10kt detected. Triggered lateral yaw trim.</td>
+                  <td><span class="badge badge-success">ACTIVE</span></td>
+                </tr>
+                <tr>
+                  <td>19:38</td>
+                  <td class="code">ROUTE_OFF_2.4M</td>
+                  <td>Bypassing rising thermals to protect cargo thermal envelope.</td>
+                  <td><span class="badge badge-success">OK</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- Global System Alerts Overlay Panel -->
+    <div id="global-alert-banner" class="hidden">
+      <div class="alert-content">
+        <i data-lucide="alert-triangle" class="alert-icon"></i>
+        <div class="alert-message">
+          <span class="title">CRITICAL SYSTEM WARNING</span>
+          <span class="desc" id="alert-banner-text">Sensor fault detected. Checking safety parameters.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Emergency Command Panel / Operator Overlay Console Actions -->
+    <footer class="emergency-bar">
+      <div class="emergency-title">EMERGENCY SYSTEM OVERRIDE</div>
+      <div class="action-buttons">
+        <button class="btn btn-warning" id="btn-rtl"><i data-lucide="home"></i> RETURN TO LAUNCH (RTL)</button>
+        <button class="btn btn-warning" id="btn-loiter"><i data-lucide="anchor"></i> LOITER / HOVER</button>
+        <button class="btn btn-danger" id="btn-land"><i data-lucide="arrow-down-to-line"></i> IMMEDIATE LAND</button>
+        <button class="btn btn-danger" id="btn-kill"><i data-lucide="skull"></i> MOTOR KILL SWITCH</button>
+        <button class="btn btn-override" id="btn-override"><i data-lucide="shield-alert"></i> REQUEST OPERATOR OVERRIDE</button>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Loading components logic -->
+  <script src="drone3d.js"></script>
+  <script src="worldmodel.js"></script>
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+  
+  <script>
+    // Initialize Lucide Icons after the page loads
+    lucide.createIcons();
+  </script>
+</body>
+</html>
